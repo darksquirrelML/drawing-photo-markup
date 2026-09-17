@@ -1,0 +1,15 @@
+{
+  "name": "Drawing Photo Markup",
+  "short_name": "Photo Markup",
+  "description": "Tap a spot on a drawing, take a photo, and it's linked to that exact spot.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#a1854a",
+  "orientation": "any",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
