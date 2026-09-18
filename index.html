@@ -100,6 +100,11 @@
     width: 100%; padding: 14px; border: none; border-radius: 10px;
     background: #eef2ff; color: #4338ca; font-weight: 700; font-size: 14px;
   }
+  #deleteProjectBtn {
+    width: 100%; padding: 12px; border: none; border-radius: 10px;
+    background: #fef2f2; color: #b91c1c; font-weight: 700; font-size: 13px;
+    margin-top: 24px;
+  }
 
   #viewerWrap {
     display: flex; justify-content: center; padding: 12px; background: #d9dce1;
@@ -221,6 +226,7 @@
   <h2>Drawing Photo Markup</h2>
   <div class="startCard">
     <h3>Start a new project</h3>
+    <input id="newProjectCodeInput" placeholder="Project code, e.g. P202 (optional)" maxlength="8" style="margin-bottom:8px;text-transform:uppercase;">
     <input type="file" id="newProjectFileInput" accept="application/pdf" class="hidden">
     <button id="newProjectBtn">Add First Drawing &amp; Start</button>
   </div>
@@ -243,6 +249,7 @@
     <div id="drawingList"></div>
     <input type="file" id="addDrawingFileInput" accept="application/pdf" class="hidden">
     <button id="addDrawingBtn">+ Add Floor / Drawing</button>
+    <button id="deleteProjectBtn">Delete Project (Admin)</button>
   </div>
 </div>
 
@@ -292,6 +299,7 @@
 const SUPABASE_URL = 'https://pyyncjesibtrilipsfhm.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5eW5jamVzaWJ0cmlsaXBzZmhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzMTcwMTQsImV4cCI6MjA5Njg5MzAxNH0._N1814zGx3ulKejZ5yre0gaTzEjjurikV9Zjih4vDo4';
 const BUCKET = 'markup-photos';
+const ADMIN_PASSWORD = 'admin1234'; // required to delete a whole project
 // ================================================================
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -302,6 +310,7 @@ let currentDrawingId = null;
 let currentDrawingName = null;
 let drawings = [];
 let pendingDrawingName = '';
+let pendingCustomCode = '';
 let pdfDoc = null;
 let currentPage = null;
 let markers = []; // {id, temp, number, xPct, yPct, photo, afterPhoto, note}
@@ -348,6 +357,7 @@ const reportBtn = document.getElementById('reportBtn');
 const photoPlanBtn = document.getElementById('photoPlanBtn');
 
 const startScreen = document.getElementById('startScreen');
+const newProjectCodeInput = document.getElementById('newProjectCodeInput');
 const newProjectFileInput = document.getElementById('newProjectFileInput');
 const newProjectBtn = document.getElementById('newProjectBtn');
 const joinCodeInput = document.getElementById('joinCodeInput');
@@ -360,6 +370,7 @@ const drawingListSwitchBtn = document.getElementById('drawingListSwitchBtn');
 const drawingListEl = document.getElementById('drawingList');
 const addDrawingBtn = document.getElementById('addDrawingBtn');
 const addDrawingFileInput = document.getElementById('addDrawingFileInput');
+const deleteProjectBtn = document.getElementById('deleteProjectBtn');
 
 const viewerWrap = document.getElementById('viewerWrap');
 const listPanel = document.getElementById('listPanel');
@@ -405,6 +416,7 @@ newProjectBtn.addEventListener('click', () => {
   const name = prompt('Name this drawing (e.g. Level 1, Roof):', 'Level 1');
   if (!name || !name.trim()) return;
   pendingDrawingName = name.trim();
+  pendingCustomCode = newProjectCodeInput.value.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
   newProjectFileInput.click();
 });
 
@@ -413,8 +425,9 @@ newProjectFileInput.addEventListener('change', async (e) => {
   newProjectFileInput.value = '';
   if (!file) return;
   newProjectBtn.textContent = 'Uploading...';
-  await createProjectWithDrawing(file, pendingDrawingName);
+  const ok = await createProjectWithDrawing(file, pendingDrawingName);
   newProjectBtn.textContent = 'Add First Drawing & Start';
+  if (ok) newProjectCodeInput.value = '';
 });
 
 joinBtn.addEventListener('click', () => {
@@ -431,14 +444,22 @@ function genCode() {
 
 // ---- project / drawing (floor) management ----
 async function createProjectWithDrawing(file, drawingName) {
-  const code = genCode();
+  let code = pendingCustomCode;
+  if (code) {
+    const { data: existing, error: checkErr } = await sb.from('markup_projects').select('code').eq('code', code).maybeSingle();
+    if (checkErr) { alert('Could not check that code: ' + checkErr.message); return false; }
+    if (existing) { alert(`The code "${code}" is already in use. Please choose a different one.`); return false; }
+  } else {
+    code = genCode();
+  }
   const { error: projErr } = await sb.from('markup_projects').insert({ code });
-  if (projErr) { alert('Could not create project: ' + projErr.message); return; }
+  if (projErr) { alert('Could not create project: ' + projErr.message); return false; }
   localStorage.setItem('markup_last_code', code);
   const drawing = await uploadDrawing(code, file, drawingName);
-  if (!drawing) return;
+  if (!drawing) return false;
   await openDrawingListScreen(code);
   await openDrawing(drawing.id);
+  return true;
 }
 
 async function uploadDrawing(code, file, drawingName) {
@@ -536,6 +557,58 @@ drawingListCopyBtn.addEventListener('click', () => {
   });
 });
 drawingListSwitchBtn.addEventListener('click', backToStart);
+
+// ---- delete project (admin password required) ----
+deleteProjectBtn.addEventListener('click', async () => {
+  const pwd = prompt('Enter the admin password to delete this project:');
+  if (pwd === null) return; // cancelled
+  if (pwd !== ADMIN_PASSWORD) { alert('Incorrect password.'); return; }
+  const sure = confirm(
+    `This will permanently delete project ${projectCode} - every drawing, marker, and photo in it. ` +
+    `This cannot be undone. Continue?`
+  );
+  if (!sure) return;
+
+  deleteProjectBtn.disabled = true;
+  deleteProjectBtn.textContent = 'Deleting...';
+  const ok = await deleteProjectCompletely(projectCode);
+  if (ok) {
+    alert('Project deleted.');
+    backToStart();
+  } else {
+    deleteProjectBtn.disabled = false;
+    deleteProjectBtn.textContent = 'Delete Project (Admin)';
+  }
+});
+
+// removes every storage file, marker, and drawing under a project code,
+// then the project record itself
+async function deleteProjectCompletely(code) {
+  const { data: allDrawings, error: dErr } = await sb.from('markup_drawings').select('id').eq('code', code);
+  if (dErr) { alert('Could not load this project\'s drawings: ' + dErr.message); return false; }
+
+  for (const d of allDrawings) {
+    const folderPath = `${code}/${d.id}`;
+    const { data: files, error: listErr } = await sb.storage.from(BUCKET).list(folderPath);
+    if (!listErr && files && files.length) {
+      const paths = files.map(f => `${folderPath}/${f.name}`);
+      await sb.storage.from(BUCKET).remove(paths);
+    }
+    await sb.storage.from(BUCKET).remove([`${code}/${d.id}.pdf`]);
+  }
+
+  const drawingIds = allDrawings.map(d => d.id);
+  if (drawingIds.length) {
+    const { error: mErr } = await sb.from('markup_markers').delete().in('drawing_id', drawingIds);
+    if (mErr) { alert('Could not delete markers: ' + mErr.message); return false; }
+  }
+  const { error: drErr } = await sb.from('markup_drawings').delete().eq('code', code);
+  if (drErr) { alert('Could not delete drawings: ' + drErr.message); return false; }
+  const { error: pErr } = await sb.from('markup_projects').delete().eq('code', code);
+  if (pErr) { alert('Could not delete project: ' + pErr.message); return false; }
+
+  return true;
+}
 
 async function openDrawing(drawingId) {
   let d = drawings.find((x) => x.id === drawingId);
