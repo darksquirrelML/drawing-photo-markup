@@ -412,11 +412,11 @@ if (!isConfigured()) {
 }
 
 // ---- start screen actions ----
+// open the file picker immediately on tap (a direct response to the tap always
+// works); ask for the drawing name afterward, once a PDF has been picked -
+// asking first and opening the picker after can get silently blocked on some
+// phones (especially once the app is installed to the home screen)
 newProjectBtn.addEventListener('click', () => {
-  const name = prompt('Name this drawing (e.g. Level 1, Roof):', 'Level 1');
-  if (!name || !name.trim()) return;
-  pendingDrawingName = name.trim();
-  pendingCustomCode = newProjectCodeInput.value.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
   newProjectFileInput.click();
 });
 
@@ -424,6 +424,10 @@ newProjectFileInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   newProjectFileInput.value = '';
   if (!file) return;
+  const name = prompt('Name this drawing (e.g. Level 1, Roof):', 'Level 1');
+  if (!name || !name.trim()) return;
+  pendingDrawingName = name.trim();
+  pendingCustomCode = newProjectCodeInput.value.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '');
   newProjectBtn.textContent = 'Uploading...';
   const ok = await createProjectWithDrawing(file, pendingDrawingName);
   newProjectBtn.textContent = 'Add First Drawing & Start';
@@ -534,9 +538,6 @@ function renderDrawingList() {
 }
 
 addDrawingBtn.addEventListener('click', () => {
-  const name = prompt('Name this drawing (e.g. Level 2, Roof):', '');
-  if (!name || !name.trim()) return;
-  pendingDrawingName = name.trim();
   addDrawingFileInput.click();
 });
 
@@ -544,6 +545,9 @@ addDrawingFileInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   addDrawingFileInput.value = '';
   if (!file) return;
+  const name = prompt('Name this drawing (e.g. Level 2, Roof):', '');
+  if (!name || !name.trim()) return;
+  pendingDrawingName = name.trim();
   addDrawingBtn.textContent = 'Uploading...';
   const drawing = await uploadDrawing(projectCode, file, pendingDrawingName);
   addDrawingBtn.textContent = '+ Add Floor / Drawing';
