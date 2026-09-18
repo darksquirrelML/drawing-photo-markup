@@ -93,8 +93,10 @@
     border: none; border-radius: 8px; padding: 8px 10px; font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap;
   }
   .drawing-pdf-link { background: #f3f4f6; color: #374151; }
+  .drawing-rename { background: #f3f4f6; color: #374151; }
   .drawing-report { background: #047857; color: #fff; }
   .drawing-photoplan { background: #7c3aed; color: #fff; }
+  .drawing-delete { background: #fef2f2; color: #b91c1c; }
   .drawing-open { background: #2563eb; color: #fff; }
   #addDrawingBtn {
     width: 100%; padding: 14px; border: none; border-radius: 10px;
@@ -522,19 +524,58 @@ function renderDrawingList() {
     row.innerHTML = `
       <div class="drawing-name">${escapeHtml(d.drawing_name)}</div>
       <a class="drawing-pdf-link" href="${d.pdf_url}" download="${escapeHtml(d.pdf_name || d.drawing_name + '.pdf')}" target="_blank" rel="noopener">PDF</a>
+      <button class="drawing-rename">Rename</button>
       <button class="drawing-report">Report</button>
       <button class="drawing-photoplan">Photo Plan</button>
+      <button class="drawing-delete">Delete</button>
       <button class="drawing-open">Open &rarr;</button>
     `;
     row.querySelector('.drawing-open').addEventListener('click', () => openDrawing(d.id));
+    row.querySelector('.drawing-rename').addEventListener('click', () => renameDrawing(d.id, d.drawing_name));
     row.querySelector('.drawing-report').addEventListener('click', (ev) => {
       downloadStandardReport(d.id, d.drawing_name, ev.currentTarget);
     });
     row.querySelector('.drawing-photoplan').addEventListener('click', (ev) => {
       downloadPhotoPlanReport(d.id, d.drawing_name, ev.currentTarget);
     });
+    row.querySelector('.drawing-delete').addEventListener('click', () => deleteSingleDrawing(d.id, d.drawing_name));
     drawingListEl.appendChild(row);
   });
+}
+
+async function renameDrawing(drawingId, currentName) {
+  const newName = prompt('Rename this drawing:', currentName || '');
+  if (!newName || !newName.trim() || newName.trim() === currentName) return;
+  const { error } = await sb.from('markup_drawings').update({ drawing_name: newName.trim() }).eq('id', drawingId);
+  if (error) { alert('Could not rename: ' + error.message); return; }
+  await loadDrawings();
+}
+
+// removes one drawing's storage files, markers, and its own row - same admin
+// password gate as deleting a whole project, since this is just as permanent
+async function deleteSingleDrawing(drawingId, drawingName) {
+  const pwd = prompt('Enter the admin password to delete this drawing:');
+  if (pwd === null) return;
+  if (pwd !== ADMIN_PASSWORD) { alert('Incorrect password.'); return; }
+  const sure = confirm(
+    `This will permanently delete "${drawingName}" - all its markers and photos. This cannot be undone. Continue?`
+  );
+  if (!sure) return;
+
+  const folderPath = `${projectCode}/${drawingId}`;
+  const { data: files, error: listErr } = await sb.storage.from(BUCKET).list(folderPath);
+  if (!listErr && files && files.length) {
+    const paths = files.map(f => `${folderPath}/${f.name}`);
+    await sb.storage.from(BUCKET).remove(paths);
+  }
+  await sb.storage.from(BUCKET).remove([`${projectCode}/${drawingId}.pdf`]);
+
+  const { error: mErr } = await sb.from('markup_markers').delete().eq('drawing_id', drawingId);
+  if (mErr) { alert('Could not delete this drawing\'s markers: ' + mErr.message); return; }
+  const { error: dErr } = await sb.from('markup_drawings').delete().eq('id', drawingId);
+  if (dErr) { alert('Could not delete drawing: ' + dErr.message); return; }
+
+  await loadDrawings();
 }
 
 addDrawingBtn.addEventListener('click', () => {
