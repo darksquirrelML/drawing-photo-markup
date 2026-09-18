@@ -617,12 +617,11 @@ deleteProjectBtn.addEventListener('click', async () => {
   deleteProjectBtn.disabled = true;
   deleteProjectBtn.textContent = 'Deleting...';
   const ok = await deleteProjectCompletely(projectCode);
+  deleteProjectBtn.disabled = false;
+  deleteProjectBtn.textContent = 'Delete Project (Admin)';
   if (ok) {
     alert('Project deleted.');
     backToStart();
-  } else {
-    deleteProjectBtn.disabled = false;
-    deleteProjectBtn.textContent = 'Delete Project (Admin)';
   }
 });
 
