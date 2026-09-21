@@ -244,6 +244,7 @@
     Code: <b id="drawingListCodeDisplay"></b>
     <div class="spacer"></div>
     <button id="drawingListCopyBtn">Copy</button>
+    <button id="editProjectInfoBtn">Edit Info</button>
     <button id="drawingListSwitchBtn" class="switch">Switch</button>
   </div>
   <div id="drawingListBody">
@@ -308,6 +309,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 
 let sb = null;
 let projectCode = null;
+let projectTitle = '';
+let projectSubject = '';
+let projectPreparedBy = '';
 let currentDrawingId = null;
 let currentDrawingName = null;
 let drawings = [];
@@ -368,6 +372,7 @@ const joinBtn = document.getElementById('joinBtn');
 const drawingListScreen = document.getElementById('drawingListScreen');
 const drawingListCodeDisplay = document.getElementById('drawingListCodeDisplay');
 const drawingListCopyBtn = document.getElementById('drawingListCopyBtn');
+const editProjectInfoBtn = document.getElementById('editProjectInfoBtn');
 const drawingListSwitchBtn = document.getElementById('drawingListSwitchBtn');
 const drawingListEl = document.getElementById('drawingList');
 const addDrawingBtn = document.getElementById('addDrawingBtn');
@@ -460,6 +465,9 @@ async function createProjectWithDrawing(file, drawingName) {
   }
   const { error: projErr } = await sb.from('markup_projects').insert({ code });
   if (projErr) { alert('Could not create project: ' + projErr.message); return false; }
+  projectTitle = '';
+  projectSubject = '';
+  projectPreparedBy = '';
   localStorage.setItem('markup_last_code', code);
   const drawing = await uploadDrawing(code, file, drawingName);
   if (!drawing) return false;
@@ -487,6 +495,9 @@ async function joinProject(code) {
   code = code.trim().toUpperCase();
   const { data, error } = await sb.from('markup_projects').select('*').eq('code', code).single();
   if (error || !data) { alert('Project not found. Check the code.'); return; }
+  projectTitle = data.project_title || '';
+  projectSubject = data.subject || '';
+  projectPreparedBy = data.prepared_by || '';
   localStorage.setItem('markup_last_code', code);
   await openDrawingListScreen(code);
 }
@@ -699,6 +710,9 @@ function backToDrawingList() {
 function backToStart() {
   if (channel) { sb.removeChannel(channel); channel = null; }
   projectCode = null;
+  projectTitle = '';
+  projectSubject = '';
+  projectPreparedBy = '';
   currentDrawingId = null;
   markers = [];
   drawings = [];
