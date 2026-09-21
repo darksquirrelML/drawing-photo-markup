@@ -614,6 +614,26 @@ drawingListCopyBtn.addEventListener('click', () => {
 });
 drawingListSwitchBtn.addEventListener('click', backToStart);
 
+editProjectInfoBtn.addEventListener('click', async () => {
+  const title = prompt('Project Title (shown at the top of reports):', projectTitle || '');
+  if (title === null) return;
+  const subject = prompt('Subject:', projectSubject || '');
+  if (subject === null) return;
+  const preparedBy = prompt('Prepared By:', projectPreparedBy || '');
+  if (preparedBy === null) return;
+
+  const { error } = await sb
+    .from('markup_projects')
+    .update({ project_title: title.trim(), subject: subject.trim(), prepared_by: preparedBy.trim() })
+    .eq('code', projectCode);
+  if (error) { alert('Could not save project info: ' + error.message); return; }
+
+  projectTitle = title.trim();
+  projectSubject = subject.trim();
+  projectPreparedBy = preparedBy.trim();
+  alert('Project info saved. This will now appear on future reports.');
+});
+
 // ---- delete project (admin password required) ----
 deleteProjectBtn.addEventListener('click', async () => {
   const pwd = prompt('Enter the admin password to delete this project:');
@@ -1192,11 +1212,12 @@ function drawNumberedDots(sourceCanvas, rows) {
 // with the arrow glued to both the square and the photo (see
 // downloadPhotoPlanReport), so dragging or resizing a photo drags its arrow
 // along with it.
-function computePhotoPlanLayout(baseCanvas, rows) {
+function computePhotoPlanLayout(baseCanvas, rows, photoField) {
+  photoField = photoField || 'photo_url';
   const PHOTO_W = 220, PHOTO_H = 165, GAP = 26;
   const bw = baseCanvas.width, bh = baseCanvas.height;
 
-  const items = rows.filter(row => row.photo_url).map(row => ({
+  const items = rows.filter(row => row[photoField]).map(row => ({
     row, px: Number(row.x_pct) * bw, py: Number(row.y_pct) * bh
   }));
   if (items.length === 0) return { canvasW: bw, canvasH: bh, items: [] };
@@ -1355,8 +1376,17 @@ async function downloadStandardReport(drawingId, drawingName, triggerBtn) {
     const docxMod = await loadDocxLib();
     const { Document, Packer, Paragraph, ImageRun, HeadingLevel, AlignmentType, Table, TableRow, TableCell, WidthType } = docxMod;
     const children = [];
-    children.push(new Paragraph({ text: drawingName || 'Drawing Markup Report', heading: HeadingLevel.TITLE }));
-    children.push(new Paragraph({ text: `Project code: ${projectCode}    Generated: ${new Date().toLocaleString()}`, spacing: { after: 300 } }));
+    const reportTitleText = (projectTitle && projectTitle.trim()) ? projectTitle.trim() : (drawingName || 'Drawing Markup Report');
+    children.push(new Paragraph({ text: reportTitleText, heading: HeadingLevel.TITLE }));
+    if (projectTitle && projectTitle.trim()) {
+      children.push(new Paragraph({ text: drawingName || '', heading: HeadingLevel.HEADING_3, spacing: { after: 100 } }));
+    }
+    if (projectSubject && projectSubject.trim()) {
+      children.push(new Paragraph({ text: `Subject: ${projectSubject.trim()}`, spacing: { after: 60 } }));
+    }
+    const metaParts = [`Project code: ${projectCode}`, `Date: ${new Date().toLocaleDateString()}`];
+    if (projectPreparedBy && projectPreparedBy.trim()) metaParts.push(`Prepared by: ${projectPreparedBy.trim()}`);
+    children.push(new Paragraph({ text: metaParts.join('    '), spacing: { after: 300 } }));
 
     if (baseCanvas && data.length > 0) {
       try {
@@ -1394,29 +1424,30 @@ async function downloadStandardReport(drawingId, drawingName, triggerBtn) {
         beforeCellChildren.push(new Paragraph({ text: '(no photo)' }));
       }
 
-      const afterCellChildren = [new Paragraph({ text: 'After', alignment: AlignmentType.CENTER })];
       if (row.after_photo_url) {
+        const afterCellChildren = [new Paragraph({ text: 'After', alignment: AlignmentType.CENTER })];
         try {
           const buf = await getImageBuffer(row.after_photo_url);
           afterCellChildren.push(new Paragraph({ children: [new ImageRun({ data: buf, transformation: { width: 220, height: 165 } })], alignment: AlignmentType.CENTER }));
         } catch (err) {
           afterCellChildren.push(new Paragraph({ text: '(photo could not be loaded)' }));
         }
-      } else {
-        afterCellChildren.push(new Paragraph({ text: '(not added yet)' }));
-      }
 
-      children.push(new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        rows: [
-          new TableRow({
-            children: [
-              new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: beforeCellChildren }),
-              new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: afterCellChildren })
-            ]
-          })
-        ]
-      }));
+        children.push(new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: beforeCellChildren }),
+                new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: afterCellChildren })
+              ]
+            })
+          ]
+        }));
+      } else {
+        // no after photo yet for this marker - just show Before, no blank column
+        children.push(...beforeCellChildren);
+      }
     }
 
     const doc = new Document({ sections: [{ children }] });
@@ -1482,12 +1513,20 @@ async function downloadPhotoPlanReport(drawingId, drawingName, triggerBtn) {
   if (!drawingId) return;
   const btn = triggerBtn || photoPlanBtn;
   const originalLabel = btn.textContent;
+
+  const choice = prompt('Which photos should this Photo Plan use? Type "before" or "after":', 'before');
+  if (choice === null) return;
+  const useAfter = choice.trim().toLowerCase().startsWith('a');
+  const photoField = useAfter ? 'after_photo_url' : 'photo_url';
+  const photoLabel = useAfter ? 'After' : 'Before';
+
   btn.disabled = true;
   btn.textContent = '...';
   try {
+
     let data;
     if (localMode) {
-      data = markers.map(m => ({ marker_number: m.number, photo_url: m.photo, x_pct: m.xPct, y_pct: m.yPct }));
+      data = markers.map(m => ({ marker_number: m.number, photo_url: m.photo, after_photo_url: m.afterPhoto, x_pct: m.xPct, y_pct: m.yPct }));
     } else {
       const res = await sb.from('markup_markers').select('*').eq('drawing_id', drawingId).order('marker_number', { ascending: true });
       if (res.error) { alert('Could not load markers: ' + res.error.message); return; }
@@ -1499,8 +1538,8 @@ async function downloadPhotoPlanReport(drawingId, drawingName, triggerBtn) {
     if (data.length === 0) { alert('No photos have been added to this drawing yet.'); return; }
 
     const baseCanvas = await renderPdfToCanvas(drawingRow.pdf_url, 1100);
-    const layout = computePhotoPlanLayout(baseCanvas, data);
-    if (layout.items.length === 0) { alert('No before photos to place on this plan yet.'); return; }
+    const layout = computePhotoPlanLayout(baseCanvas, data, photoField);
+    if (layout.items.length === 0) { alert(`No ${photoLabel.toLowerCase()} photos to place on this plan yet.`); return; }
 
     const [PptxGenJS, JSZip] = await Promise.all([loadPptxLib(), loadJsZipLib()]);
     const pptx = new PptxGenJS();
@@ -1525,7 +1564,7 @@ async function downloadPhotoPlanReport(drawingId, drawingName, triggerBtn) {
       x: OFFSET_X_IN + toIn(layout.drawX), y: OFFSET_Y_IN + toIn(layout.drawY),
       w: toIn(layout.drawW), h: toIn(layout.drawH)
     });
-    slide.addText((drawingName || 'Drawing') + ' - Photo Location Plan', {
+    slide.addText((drawingName || 'Drawing') + ` - Photo Location Plan (${photoLabel})`, {
       x: 0.3, y: 0.2, w: 12, h: 0.5, fontSize: 22, bold: true, fontFace: 'Arial'
     });
     slide.addText(
@@ -1546,7 +1585,7 @@ async function downloadPhotoPlanReport(drawingId, drawingName, triggerBtn) {
     for (const it of layout.items) {
       let photoData;
       try {
-        photoData = await getImageDataUrl(it.row.photo_url);
+        photoData = await getImageDataUrl(it.row[photoField]);
       } catch (err) {
         console.error('Could not load a photo for the plan', err);
         continue;
