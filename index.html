@@ -1412,19 +1412,24 @@ async function downloadStandardReport(drawingId, drawingName, triggerBtn) {
       children.push(new Paragraph({ text: `Marker ${row.marker_number}`, heading: HeadingLevel.HEADING_2, spacing: { before: 300 } }));
       if (row.note) children.push(new Paragraph({ text: row.note, spacing: { after: 150 } }));
 
-      const beforeCellChildren = [new Paragraph({ text: 'Before', alignment: AlignmentType.CENTER })];
+      // build the photo content first, without a "Before" label - a marker
+      // with only one photo could be a pending defect OR just a plain survey
+      // record, so we don't assume "Before" unless there's an After to pair it with
+      const photoContentChildren = [];
       if (row.photo_url) {
         try {
           const buf = await getImageBuffer(row.photo_url);
-          beforeCellChildren.push(new Paragraph({ children: [new ImageRun({ data: buf, transformation: { width: 220, height: 165 } })], alignment: AlignmentType.CENTER }));
+          photoContentChildren.push(new Paragraph({ children: [new ImageRun({ data: buf, transformation: { width: 220, height: 165 } })], alignment: AlignmentType.CENTER }));
         } catch (err) {
-          beforeCellChildren.push(new Paragraph({ text: '(photo could not be loaded)' }));
+          photoContentChildren.push(new Paragraph({ text: '(photo could not be loaded)' }));
         }
       } else {
-        beforeCellChildren.push(new Paragraph({ text: '(no photo)' }));
+        photoContentChildren.push(new Paragraph({ text: '(no photo)' }));
       }
 
       if (row.after_photo_url) {
+        // both photos exist - now "Before"/"After" labels are meaningful, so add them
+        const beforeCellChildren = [new Paragraph({ text: 'Before', alignment: AlignmentType.CENTER }), ...photoContentChildren];
         const afterCellChildren = [new Paragraph({ text: 'After', alignment: AlignmentType.CENTER })];
         try {
           const buf = await getImageBuffer(row.after_photo_url);
@@ -1445,8 +1450,9 @@ async function downloadStandardReport(drawingId, drawingName, triggerBtn) {
           ]
         }));
       } else {
-        // no after photo yet for this marker - just show Before, no blank column
-        children.push(...beforeCellChildren);
+        // only one photo for this marker - no "Before" label, just the photo
+        // (reads fine whether this is a pending defect or a plain survey shot)
+        children.push(...photoContentChildren);
       }
     }
 
