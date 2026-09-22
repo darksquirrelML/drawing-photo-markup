@@ -182,6 +182,13 @@
   .list-note { font-size: 13px; color: #374151; line-height: 1.4; }
   .list-note.empty { color: #9ca3af; font-style: italic; }
 
+  /* on a computer / wide screen, show the photo cards as a 4-across grid,
+     like Defect Tracker - phones stay a single stacked column */
+  @media (min-width: 820px) {
+    #markerList { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; align-items: start; }
+    .list-photo-col img, .list-photo-empty { height: 120px; }
+  }
+
   #modalOverlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 50;
     display: flex; align-items: flex-end; justify-content: center;
@@ -1427,52 +1434,57 @@ async function downloadStandardReport(drawingId, drawingName, triggerBtn) {
       children.push(new Paragraph({ text: 'No photos have been added to this drawing yet.' }));
     }
 
-    for (const row of data) {
-      children.push(new Paragraph({ text: `Marker ${row.marker_number}`, heading: HeadingLevel.HEADING_2, spacing: { before: 300 } }));
-      if (row.note) children.push(new Paragraph({ text: row.note, spacing: { after: 150 } }));
-
-      // build the photo content first, without a "Before" label - a marker
-      // with only one photo could be a pending defect OR just a plain survey
-      // record, so we don't assume "Before" unless there's an After to pair it with
-      const photoContentChildren = [];
-      if (row.photo_url) {
-        try {
-          const buf = await getImageBuffer(row.photo_url);
-          photoContentChildren.push(new Paragraph({ children: [new ImageRun({ data: buf, transformation: { width: 220, height: 165 } })], alignment: AlignmentType.CENTER }));
-        } catch (err) {
-          photoContentChildren.push(new Paragraph({ text: '(photo could not be loaded)' }));
-        }
-      } else {
-        photoContentChildren.push(new Paragraph({ text: '(no photo)' }));
+    // Pack 2 markers per table row: a before-only marker contributes 1
+    // photo column, a before+after marker contributes 2 (kept together).
+    // So a row of before-only markers shows 2 photos, and a row where both
+    // markers have after photos shows 4.
+    const markerCellGroups = data.map(row => {
+      const hasAfter = !!row.after_photo_url;
+      const group = [{
+        url: row.photo_url,
+        label: `Marker ${row.marker_number}` + (hasAfter ? ' - Before' : ''),
+        note: row.note
+      }];
+      if (hasAfter) {
+        group.push({ url: row.after_photo_url, label: `Marker ${row.marker_number} - After`, note: null });
       }
+      return group;
+    });
 
-      if (row.after_photo_url) {
-        // both photos exist - now "Before"/"After" labels are meaningful, so add them
-        const beforeCellChildren = [new Paragraph({ text: 'Before', alignment: AlignmentType.CENTER }), ...photoContentChildren];
-        const afterCellChildren = [new Paragraph({ text: 'After', alignment: AlignmentType.CENTER })];
-        try {
-          const buf = await getImageBuffer(row.after_photo_url);
-          afterCellChildren.push(new Paragraph({ children: [new ImageRun({ data: buf, transformation: { width: 220, height: 165 } })], alignment: AlignmentType.CENTER }));
-        } catch (err) {
-          afterCellChildren.push(new Paragraph({ text: '(photo could not be loaded)' }));
+    const packedRows = [];
+    for (let i = 0; i < markerCellGroups.length; i += 2) {
+      const pair = markerCellGroups.slice(i, i + 2);
+      packedRows.push(pair.flat());
+    }
+
+    for (const rowCells of packedRows) {
+      const colCount = rowCells.length;
+      // bigger photos when only 1-2 per row, smaller once a row is full (4)
+      const imgW = Math.max(110, Math.min(220, Math.floor(560 / colCount)));
+      const imgH = Math.round(imgW * 0.75);
+      const tableCells = [];
+      for (const cell of rowCells) {
+        const cellChildren = [new Paragraph({ text: cell.label, alignment: AlignmentType.CENTER, spacing: { after: 60 } })];
+        if (cell.url) {
+          try {
+            const buf = await getImageBuffer(cell.url);
+            cellChildren.push(new Paragraph({ children: [new ImageRun({ data: buf, transformation: { width: imgW, height: imgH } })], alignment: AlignmentType.CENTER }));
+          } catch (err) {
+            cellChildren.push(new Paragraph({ text: '(photo could not be loaded)', alignment: AlignmentType.CENTER }));
+          }
+        } else {
+          cellChildren.push(new Paragraph({ text: '(no photo)', alignment: AlignmentType.CENTER }));
         }
-
-        children.push(new Table({
-          width: { size: 100, type: WidthType.PERCENTAGE },
-          rows: [
-            new TableRow({
-              children: [
-                new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: beforeCellChildren }),
-                new TableCell({ width: { size: 50, type: WidthType.PERCENTAGE }, children: afterCellChildren })
-              ]
-            })
-          ]
-        }));
-      } else {
-        // only one photo for this marker - no "Before" label, just the photo
-        // (reads fine whether this is a pending defect or a plain survey shot)
-        children.push(...photoContentChildren);
+        if (cell.note && cell.note.trim()) {
+          cellChildren.push(new Paragraph({ text: cell.note.trim(), alignment: AlignmentType.CENTER, spacing: { before: 60 } }));
+        }
+        tableCells.push(new TableCell({ width: { size: Math.floor(100 / colCount), type: WidthType.PERCENTAGE }, children: cellChildren }));
       }
+      children.push(new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [new TableRow({ children: tableCells })]
+      }));
+      children.push(new Paragraph({ text: '', spacing: { after: 200 } }));
     }
 
     const doc = new Document({ sections: [{ children }] });
