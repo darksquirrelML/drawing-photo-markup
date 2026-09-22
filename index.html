@@ -108,8 +108,15 @@
     margin-top: 24px;
   }
 
+  #viewerScreen {
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  #viewerScreen.hidden { display: none; }
+  #viewerScreen #topbar, #viewerScreen #codeBar { flex-shrink: 0; }
+
   #viewerWrap {
     display: flex; justify-content: center; padding: 12px; background: #d9dce1;
+    flex-shrink: 0; max-height: 42vh; overflow-y: auto;
   }
   #canvasWrap {
     position: relative; touch-action: manipulation; background: #fff;
@@ -139,29 +146,41 @@
     text-shadow: 0 1px 2px rgba(0,0,0,0.8);
   }
 
-  #listPanel { padding: 12px; padding-bottom: 40px; }
+  #listPanel {
+    padding: 12px; padding-bottom: 40px;
+    flex: 1 1 auto; overflow-y: auto; min-height: 0;
+  }
   #listPanel h3 { margin: 4px 0 10px; font-size: 15px; }
-  #markerList { display: flex; flex-direction: column; gap: 8px; }
+  #markerList { display: flex; flex-direction: column; gap: 10px; }
   .list-row {
-    display: flex; align-items: center; gap: 10px; background: #fff;
-    border-radius: 10px; padding: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    display: flex; flex-direction: column; gap: 8px; background: #fff;
+    border-radius: 10px; padding: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.08);
   }
-  .thumb-pair { display: flex; gap: 4px; flex-shrink: 0; }
-  .list-thumb {
-    position: relative; width: 44px; height: 44px; border-radius: 8px; background-size: cover; background-position: center;
-    background-color: #e5e7eb; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-    color: #9ca3af; font-size: 11px; text-align: center;
-  }
-  .list-thumb.after.empty {
-    border: 2px dashed #c7d2fe; background-color: #eef2ff; color: #6366f1; font-size: 20px; font-weight: 700;
-  }
+  .list-row-top { display: flex; align-items: center; gap: 8px; }
+  .list-row-top .spacer { flex: 1; }
   .list-num {
-    width: 22px; height: 22px; border-radius: 50%; background: #dc2626; color: #fff;
+    width: 24px; height: 24px; border-radius: 50%; background: #dc2626; color: #fff;
     font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
-  .list-note { flex: 1; font-size: 13px; color: #374151; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .list-del { background: none; border: none; color: #9ca3af; font-size: 20px; padding: 4px 8px; flex-shrink: 0; }
+  .list-photos { display: flex; gap: 8px; }
+  .list-photo-col { flex: 1; min-width: 0; position: relative; }
+  .list-photo-col img {
+    width: 100%; height: 150px; object-fit: cover; border-radius: 8px; background: #e5e7eb; display: block;
+  }
+  .list-photo-empty {
+    height: 150px; border-radius: 8px; background: #e5e7eb; color: #9ca3af;
+    display: flex; align-items: center; justify-content: center; font-size: 13px;
+  }
+  .list-photo-col.after.empty .list-photo-empty {
+    border: 2px dashed #c7d2fe; background: #eef2ff; color: #6366f1; font-size: 28px; font-weight: 700;
+  }
+  .list-photo-badge {
+    position: absolute; left: 6px; bottom: 6px; background: rgba(0,0,0,0.6); color: #fff;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 2px 7px; border-radius: 4px;
+  }
+  .list-note { font-size: 13px; color: #374151; line-height: 1.4; }
   .list-note.empty { color: #9ca3af; font-style: italic; }
-  .list-del { background: none; border: none; color: #9ca3af; font-size: 18px; padding: 4px 8px; flex-shrink: 0; }
 
   #modalOverlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 50;
@@ -209,19 +228,33 @@
   dashboard &rarr; Settings &rarr; API). Or tap "Try without saving" below to test the app on this phone only.
 </div>
 
-<div id="topbar" class="hidden">
+<div id="viewerScreen" class="hidden">
+<div id="topbar">
   <button id="switchTopBtn">&larr;</button>
   <span id="title">No drawing loaded</span>
   <span id="markerCount"></span>
 </div>
 
-<div id="codeBar" class="hidden">
+<div id="codeBar">
   Code: <b id="codeDisplay"></b>
   <div class="spacer"></div>
   <button id="reportBtn" class="report">Report</button>
   <button id="photoPlanBtn" class="photoplan">Photo Plan</button>
   <button id="copyCodeBtn">Copy</button>
   <button id="switchProjectBtn" class="switch">Switch</button>
+</div>
+
+<div id="viewerWrap">
+  <div id="canvasWrap">
+    <canvas id="pdfCanvas"></canvas>
+    <div id="markerLayer"></div>
+  </div>
+</div>
+
+<div id="listPanel">
+  <h3>Photos on this drawing</h3>
+  <div id="markerList"></div>
+</div>
 </div>
 
 <div id="startScreen">
@@ -254,18 +287,6 @@
     <button id="addDrawingBtn">+ Add Floor / Drawing</button>
     <button id="deleteProjectBtn">Delete Project (Admin)</button>
   </div>
-</div>
-
-<div id="viewerWrap" class="hidden">
-  <div id="canvasWrap">
-    <canvas id="pdfCanvas"></canvas>
-    <div id="markerLayer"></div>
-  </div>
-</div>
-
-<div id="listPanel" class="hidden">
-  <h3>Photos on this drawing</h3>
-  <div id="markerList"></div>
 </div>
 
 <input type="file" id="cameraCaptureInput" accept="image/*" capture="environment" class="hidden">
@@ -353,6 +374,7 @@ async function loadJsZipLib() {
 
 // ---- elements ----
 const configBanner = document.getElementById('configBanner');
+const viewerScreen = document.getElementById('viewerScreen');
 const topbar = document.getElementById('topbar');
 const codeBar = document.getElementById('codeBar');
 const codeDisplayEl = document.getElementById('codeDisplay');
@@ -507,10 +529,7 @@ async function openDrawingListScreen(code) {
   localMode = false;
   if (channel) { sb.removeChannel(channel); channel = null; }
   startScreen.classList.add('hidden');
-  topbar.classList.add('hidden');
-  codeBar.classList.add('hidden');
-  viewerWrap.classList.add('hidden');
-  listPanel.classList.add('hidden');
+  viewerScreen.classList.add('hidden');
   drawingListScreen.classList.remove('hidden');
   drawingListCodeDisplay.textContent = code;
   await loadDrawings();
@@ -705,10 +724,7 @@ async function openDrawing(drawingId) {
   currentPage = await pdfDoc.getPage(1);
 
   drawingListScreen.classList.add('hidden');
-  topbar.classList.remove('hidden');
-  codeBar.classList.remove('hidden');
-  viewerWrap.classList.remove('hidden');
-  listPanel.classList.remove('hidden');
+  viewerScreen.classList.remove('hidden');
 
   await renderPage();
   await loadMarkers();
@@ -719,10 +735,7 @@ function backToDrawingList() {
   if (channel) { sb.removeChannel(channel); channel = null; }
   currentDrawingId = null;
   markers = [];
-  topbar.classList.add('hidden');
-  codeBar.classList.add('hidden');
-  viewerWrap.classList.add('hidden');
-  listPanel.classList.add('hidden');
+  viewerScreen.classList.add('hidden');
   drawingListScreen.classList.remove('hidden');
   loadDrawings();
 }
@@ -741,10 +754,7 @@ function backToStart() {
   localStorage.removeItem('markup_last_code');
   startScreen.classList.remove('hidden');
   drawingListScreen.classList.add('hidden');
-  topbar.classList.add('hidden');
-  codeBar.classList.add('hidden');
-  viewerWrap.classList.add('hidden');
-  listPanel.classList.add('hidden');
+  viewerScreen.classList.add('hidden');
   joinCodeInput.value = '';
 }
 
@@ -919,18 +929,27 @@ function renderList() {
     const row = document.createElement('div');
     row.className = 'list-row';
     const noteText = m.note && m.note.trim() ? m.note : (m.photo ? 'No note' : 'Waiting for photo…');
+    const beforeInner = m.photo
+      ? `<img src="${m.photo}"><div class="list-photo-badge">Before</div>`
+      : `<div class="list-photo-empty">...</div>`;
+    const afterInner = m.afterPhoto
+      ? `<img src="${m.afterPhoto}"><div class="list-photo-badge">After</div>`
+      : `<div class="list-photo-empty">+</div>`;
     row.innerHTML = `
-      <div class="list-num">${m.number}</div>
-      <div class="thumb-pair">
-        <div class="list-thumb before" style="${m.photo ? `background-image:url(${m.photo})` : ''}">${m.photo ? '' : '...'}</div>
-        <div class="list-thumb after ${m.afterPhoto ? '' : 'empty'}" style="${m.afterPhoto ? `background-image:url(${m.afterPhoto})` : ''}">${m.afterPhoto ? '' : '+'}</div>
+      <div class="list-row-top">
+        <div class="list-num">${m.number}</div>
+        <div class="spacer"></div>
+        <button class="list-del" data-id="${m.id}">×</button>
+      </div>
+      <div class="list-photos">
+        <div class="list-photo-col before">${beforeInner}</div>
+        <div class="list-photo-col after ${m.afterPhoto ? '' : 'empty'}">${afterInner}</div>
       </div>
       <div class="list-note ${m.note && m.note.trim() ? '' : 'empty'}">${escapeHtml(noteText)}</div>
-      <button class="list-del" data-id="${m.id}">×</button>
     `;
-    row.querySelector('.list-thumb.before').onclick = () => { if (m.photo) openModal(m.id); };
-    row.querySelector('.list-note').onclick = () => { if (m.photo) openModal(m.id); };
-    row.querySelector('.list-thumb.after').addEventListener('click', (ev) => {
+    row.querySelector('.list-photo-col.before').addEventListener('click', () => { if (m.photo) openModal(m.id); });
+    row.querySelector('.list-note').addEventListener('click', () => { if (m.photo) openModal(m.id); });
+    row.querySelector('.list-photo-col.after').addEventListener('click', (ev) => {
       ev.stopPropagation();
       if (m.afterPhoto) {
         openModal(m.id);
