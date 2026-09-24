@@ -161,6 +161,7 @@
   .list-num {
     width: 24px; height: 24px; border-radius: 50%; background: #dc2626; color: #fff;
     font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    cursor: pointer;
   }
   .list-del { background: none; border: none; color: #9ca3af; font-size: 20px; padding: 4px 8px; flex-shrink: 0; }
   .list-photos { display: flex; gap: 8px; }
@@ -331,6 +332,7 @@ const SUPABASE_URL = 'https://pyyncjesibtrilipsfhm.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB5eW5jamVzaWJ0cmlsaXBzZmhtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzMTcwMTQsImV4cCI6MjA5Njg5MzAxNH0._N1814zGx3ulKejZ5yre0gaTzEjjurikV9Zjih4vDo4';
 const BUCKET = 'markup-photos';
 const ADMIN_PASSWORD = 'admin1234'; // required to delete a whole project
+const ACCESS_PASSWORD = '6123'; // required once per device before using the app at all
 // ================================================================
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -436,11 +438,33 @@ function isConfigured() {
   return !SUPABASE_URL.includes('PASTE_YOUR') && !SUPABASE_ANON_KEY.includes('PASTE_YOUR');
 }
 
+// one shared password for the whole app - asked once per device/browser,
+// then remembered, so it doesn't get in the way of daily use afterwards
+function hasAccess() {
+  return localStorage.getItem('markup_access_granted') === '1';
+}
+
+function requestAccess() {
+  while (true) {
+    const pwd = prompt('Enter the access password to use this app:');
+    if (pwd === null) return false; // cancelled
+    if (pwd === ACCESS_PASSWORD) {
+      localStorage.setItem('markup_access_granted', '1');
+      return true;
+    }
+    alert('Incorrect password. Please try again.');
+  }
+}
+
 // ---- boot ----
 if (!isConfigured()) {
   configBanner.classList.remove('hidden');
   newProjectBtn.disabled = true;
   joinBtn.disabled = true;
+} else if (!hasAccess() && !requestAccess()) {
+  newProjectBtn.disabled = true;
+  joinBtn.disabled = true;
+  startScreen.innerHTML = '<h2>Drawing Photo Markup</h2><p style="text-align:center;color:#b91c1c;">A password is required to use this app. Reload the page and enter the correct password to continue.</p>';
 } else {
   sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   const last = localStorage.getItem('markup_last_code');
@@ -807,7 +831,7 @@ canvasWrap.addEventListener('click', (e) => {
   const rect = canvasWrap.getBoundingClientRect();
   const xPct = (e.clientX - rect.left) / rect.width;
   const yPct = (e.clientY - rect.top) / rect.height;
-  const number = markers.length + 1;
+  const number = nextMarkerNumber();
   const tempId = 'temp-' + Date.now();
   markers.push({ id: tempId, temp: true, number, xPct, yPct, photo: null, afterPhoto: null, note: '' });
   activeMarkerId = tempId;
@@ -816,6 +840,48 @@ canvasWrap.addEventListener('click', (e) => {
   renderList();
   cameraCaptureInput.click();
 });
+
+// the next number to hand out - based on the highest number currently in
+// use (not how many markers there are), so a marker that failed to save
+// earlier never leaves a gap that causes a later marker to reuse its number
+function nextMarkerNumber() {
+  if (markers.length === 0) return 1;
+  let maxNum = 0;
+  markers.forEach(m => { if (m.number > maxNum) maxNum = m.number; });
+  return maxNum + 1;
+}
+
+// lets you manually fix a photo's number (e.g. a duplicate left over from a
+// failed save) - tap the red number badge on that photo to change it
+async function renumberMarker(markerId, currentNumber) {
+  const input = prompt('Change this photo\'s number to:', String(currentNumber));
+  if (input === null) return;
+  const newNumber = parseInt(input.trim(), 10);
+  if (!Number.isInteger(newNumber) || newNumber <= 0) {
+    alert('Please enter a whole number greater than 0.');
+    return;
+  }
+  if (newNumber === currentNumber) return;
+  const clash = markers.find(m => m.id !== markerId && m.number === newNumber);
+  if (clash) {
+    alert(`Number ${newNumber} is already used by another photo on this drawing. Choose a different number.`);
+    return;
+  }
+  const marker = findMarker(markerId);
+  if (!marker) return;
+  const previousNumber = marker.number;
+  marker.number = newNumber;
+  renderMarkers();
+  renderList();
+  if (localMode || marker.temp) return;
+  const { error } = await sb.from('markup_markers').update({ marker_number: newNumber }).eq('id', markerId);
+  if (error) {
+    marker.number = previousNumber;
+    renderMarkers();
+    renderList();
+    alert('Could not save the new number: ' + error.message);
+  }
+}
 
 // ---- markers: load / realtime ----
 async function loadMarkers() {
@@ -954,6 +1020,10 @@ function renderList() {
       </div>
       <div class="list-note ${m.note && m.note.trim() ? '' : 'empty'}">${escapeHtml(noteText)}</div>
     `;
+    row.querySelector('.list-num').addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      renumberMarker(m.id, m.number);
+    });
     row.querySelector('.list-photo-col.before').addEventListener('click', () => { if (m.photo) openModal(m.id); });
     row.querySelector('.list-note').addEventListener('click', () => { if (m.photo) openModal(m.id); });
     row.querySelector('.list-photo-col.after').addEventListener('click', (ev) => {
@@ -1003,6 +1073,7 @@ function handleCapturedFile(file) {
 
   resizeImageFile(file, 1600, async (dataUrl) => {
     if (mode === 'add-after') {
+      const previousAfter = marker.afterPhoto;
       marker.afterPhoto = dataUrl;
       if (!modalOverlay.classList.contains('hidden') && activeMarkerId === marker.id) {
         modalImgAfter.src = dataUrl;
@@ -1019,14 +1090,26 @@ function handleCapturedFile(file) {
       const blob = dataUrlToBlob(dataUrl);
       const path = `${projectCode}/${currentDrawingId}/m${marker.number}-after-${Date.now()}.jpg`;
       const { error: upErr } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg' });
-      if (upErr) { alert('After-photo upload failed: ' + upErr.message); return; }
-      const { data: urlData } = sb.storage.from(BUCKET).getPublicUrl(path);
-      const { error: updErr } = await sb.from('markup_markers').update({ after_photo_url: urlData.publicUrl }).eq('id', marker.id);
-      if (updErr) alert('Could not save after photo: ' + updErr.message);
+      let updErr = null;
+      if (!upErr) {
+        const { data: urlData } = sb.storage.from(BUCKET).getPublicUrl(path);
+        const res = await sb.from('markup_markers').update({ after_photo_url: urlData.publicUrl }).eq('id', marker.id);
+        updErr = res.error;
+      }
+      if (upErr || updErr) {
+        // save failed - put the after photo back to how it was, rather than
+        // leaving an unsaved photo on screen that looks saved but isn't
+        marker.afterPhoto = previousAfter;
+        renderMarkers();
+        renderList();
+        if (!modalOverlay.classList.contains('hidden') && activeMarkerId === marker.id) openModal(marker.id);
+        alert('The after photo was not saved (check your connection) - please try again.');
+      }
       return;
     }
 
     // 'new' or 'retake-before'
+    const previousPhoto = marker.photo;
     marker.photo = dataUrl;
     if (!modalOverlay.classList.contains('hidden') && activeMarkerId === marker.id) {
       modalImgBefore.src = dataUrl;
@@ -1038,7 +1121,10 @@ function handleCapturedFile(file) {
     const blob = dataUrlToBlob(dataUrl);
     const path = `${projectCode}/${currentDrawingId}/m${marker.number}-${Date.now()}.jpg`;
     const { error: upErr } = await sb.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg' });
-    if (upErr) { alert('Photo upload failed: ' + upErr.message); return; }
+    if (upErr) {
+      failMarkerSave(marker, previousPhoto);
+      return;
+    }
     const { data: urlData } = sb.storage.from(BUCKET).getPublicUrl(path);
 
     if (marker.temp) {
@@ -1047,14 +1133,35 @@ function handleCapturedFile(file) {
         .insert({ drawing_id: currentDrawingId, marker_number: marker.number, x_pct: marker.xPct, y_pct: marker.yPct, photo_url: urlData.publicUrl, note: marker.note || '' })
         .select()
         .single();
-      if (insErr) { alert('Could not save marker: ' + insErr.message); return; }
+      if (insErr) {
+        failMarkerSave(marker, previousPhoto);
+        return;
+      }
       marker.id = insData.id;
       marker.temp = false;
     } else {
       const { error: updErr } = await sb.from('markup_markers').update({ photo_url: urlData.publicUrl }).eq('id', marker.id);
-      if (updErr) alert('Could not update photo: ' + updErr.message);
+      if (updErr) {
+        failMarkerSave(marker, previousPhoto);
+        return;
+      }
     }
   });
+}
+
+// a before-photo save failed: a brand-new marker never made it to the
+// server, so remove that dot entirely (a "ghost" photo that looks saved but
+// isn't is worse than no dot at all); an existing marker just keeps its old
+// photo instead of the new, unsaved one
+function failMarkerSave(marker, previousPhoto) {
+  if (marker.temp) {
+    markers = markers.filter(x => x.id !== marker.id);
+  } else {
+    marker.photo = previousPhoto;
+  }
+  renderMarkers();
+  renderList();
+  alert('That photo was not saved (check your connection) - please tap the spot again to retry.');
 }
 
 function dataUrlToBlob(dataUrl) {
