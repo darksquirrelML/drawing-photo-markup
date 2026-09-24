@@ -802,26 +802,51 @@ copyCodeBtn.addEventListener('click', () => {
   });
 });
 
+// on a phone, opening the keyboard (e.g. for a prompt() dialog like renumbering
+// a photo) fires a resize event too, but only the window's HEIGHT changes, not
+// its width - and the drawing's size only depends on width. So we ignore resize
+// events that don't actually change the width, otherwise a redundant re-render
+// can overlap with one already in progress and corrupt the canvas (pdf.js does
+// not support two renders on the same canvas at once).
+let lastRenderedWidth = window.innerWidth;
 window.addEventListener('resize', () => {
+  if (window.innerWidth === lastRenderedWidth) return;
+  lastRenderedWidth = window.innerWidth;
   if (currentPage) renderPage().then(renderMarkers);
 });
 
+let pageRenderInProgress = false;
+let pageRenderQueued = false;
+
 async function renderPage() {
-  const desiredWidth = canvasWrap.parentElement.clientWidth - 24;
-  const unscaledViewport = currentPage.getViewport({ scale: 1 });
-  const scale = desiredWidth / unscaledViewport.width;
-  const dpr = window.devicePixelRatio || 1;
-  const viewport = currentPage.getViewport({ scale: scale * dpr });
+  // guard against overlapping renders on the same canvas (pdf.js corrupts the
+  // canvas if render() is called again before the previous one finishes) -
+  // if one is already running, just remember to render once more after
+  if (pageRenderInProgress) { pageRenderQueued = true; return; }
+  pageRenderInProgress = true;
+  try {
+    const desiredWidth = canvasWrap.parentElement.clientWidth - 24;
+    const unscaledViewport = currentPage.getViewport({ scale: 1 });
+    const scale = desiredWidth / unscaledViewport.width;
+    const dpr = window.devicePixelRatio || 1;
+    const viewport = currentPage.getViewport({ scale: scale * dpr });
 
-  pdfCanvas.width = viewport.width;
-  pdfCanvas.height = viewport.height;
-  pdfCanvas.style.width = desiredWidth + 'px';
-  pdfCanvas.style.height = (viewport.height / dpr) + 'px';
-  canvasWrap.style.width = desiredWidth + 'px';
-  canvasWrap.style.height = (viewport.height / dpr) + 'px';
+    pdfCanvas.width = viewport.width;
+    pdfCanvas.height = viewport.height;
+    pdfCanvas.style.width = desiredWidth + 'px';
+    pdfCanvas.style.height = (viewport.height / dpr) + 'px';
+    canvasWrap.style.width = desiredWidth + 'px';
+    canvasWrap.style.height = (viewport.height / dpr) + 'px';
 
-  const ctx = pdfCanvas.getContext('2d');
-  await currentPage.render({ canvasContext: ctx, viewport }).promise;
+    const ctx = pdfCanvas.getContext('2d');
+    await currentPage.render({ canvasContext: ctx, viewport }).promise;
+  } finally {
+    pageRenderInProgress = false;
+    if (pageRenderQueued) {
+      pageRenderQueued = false;
+      renderPage().then(renderMarkers);
+    }
+  }
 }
 
 // tap on empty drawing area -> new marker at that spot, straight to camera
