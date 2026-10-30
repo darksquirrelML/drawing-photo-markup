@@ -225,6 +225,22 @@
   #deleteBtn { background: #fef2f2; color: #b91c1c; }
   #closeBtn { background: #2563eb; color: #fff; }
 
+  #sourceOverlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 60;
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  #sourceCard {
+    background: #fff; width: 100%; max-width: 480px; border-radius: 16px 16px 0 0;
+    padding: 16px 14px 20px; display: flex; flex-direction: column; gap: 10px;
+  }
+  #sourceTitle { text-align: center; font-weight: 700; font-size: 15px; color: #374151; }
+  #sourceCard button {
+    border: none; border-radius: 10px; padding: 14px; font-size: 15px; font-weight: 600;
+  }
+  #sourceCameraBtn { background: #2563eb; color: #fff; }
+  #sourceGalleryBtn { background: #eef2ff; color: #4338ca; }
+  #sourceCancelBtn { background: #f3f4f6; color: #6b7280; }
+
   .hidden { display: none !important; }
 </style>
 </head>
@@ -299,6 +315,15 @@
 
 <input type="file" id="cameraCaptureInput" accept="image/*" capture="environment" class="hidden">
 <input type="file" id="galleryPickInput" accept="image/*" class="hidden">
+
+<div id="sourceOverlay" class="hidden">
+  <div id="sourceCard">
+    <div id="sourceTitle">Add a photo</div>
+    <button id="sourceCameraBtn">&#128247; Take Photo (Camera)</button>
+    <button id="sourceGalleryBtn">&#128193; Choose from Gallery</button>
+    <button id="sourceCancelBtn">Cancel</button>
+  </div>
+</div>
 
 <div id="modalOverlay" class="hidden">
   <div id="modalCard">
@@ -863,7 +888,7 @@ canvasWrap.addEventListener('click', (e) => {
   captureMode = 'new';
   renderMarkers();
   renderList();
-  cameraCaptureInput.click();
+  askPhotoSource();
 });
 
 // the next number to hand out - based on the highest number currently in
@@ -907,6 +932,38 @@ async function renumberMarker(markerId, currentNumber) {
     alert('Could not save the new number: ' + error.message);
   }
 }
+
+// asks whether the photo comes from the camera or the gallery. Each button is
+// its own direct tap, so the phone still allows the picker to open.
+const sourceOverlay = document.getElementById('sourceOverlay');
+function askPhotoSource() {
+  sourceOverlay.classList.remove('hidden');
+}
+function closePhotoSource() {
+  sourceOverlay.classList.add('hidden');
+}
+document.getElementById('sourceCameraBtn').addEventListener('click', () => {
+  closePhotoSource();
+  cameraCaptureInput.click();
+});
+document.getElementById('sourceGalleryBtn').addEventListener('click', () => {
+  closePhotoSource();
+  galleryPickInput.click();
+});
+function cancelPhotoSource() {
+  closePhotoSource();
+  // a brand-new dot that never got a photo is removed again
+  const m = findMarker(activeMarkerId);
+  if (m && m.temp && !m.photo) {
+    markers = markers.filter(x => x.id !== m.id);
+    renderMarkers();
+    renderList();
+  }
+}
+document.getElementById('sourceCancelBtn').addEventListener('click', cancelPhotoSource);
+sourceOverlay.addEventListener('click', (e) => {
+  if (e.target === sourceOverlay) cancelPhotoSource();
+});
 
 // ---- markers: load / realtime ----
 async function loadMarkers() {
@@ -1011,7 +1068,7 @@ function attachMarkerInteraction(div, m) {
       } else {
         activeMarkerId = m.id;
         captureMode = 'new';
-        cameraCaptureInput.click();
+        askPhotoSource();
       }
     }
   });
@@ -1058,7 +1115,7 @@ function renderList() {
       } else if (m.photo) {
         activeMarkerId = m.id;
         captureMode = 'add-after';
-        cameraCaptureInput.click();
+        askPhotoSource();
       } else {
         alert('Add the before photo first (tap the dot on the drawing).');
       }
