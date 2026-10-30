@@ -1516,6 +1516,34 @@ function computePhotoPlanLayout(baseCanvas, rows, photoField) {
 const SIDE_TO_SQUARE_IDX = { left: 3, right: 1, top: 0, bottom: 2 };
 const SIDE_TO_PHOTO_IDX = { left: 1, right: 3, top: 2, bottom: 0 };
 
+// shrinks a photo's real size to fit inside a box WITHOUT changing its
+// width-to-height ratio (so portrait and landscape photos are never stretched)
+function fitInside(nw, nh, maxW, maxH) {
+  if (!nw || !nh) return { w: maxW, h: maxH };
+  const scale = Math.min(maxW / nw, maxH / nh);
+  return { w: nw * scale, h: nh * scale };
+}
+
+// real pixel size of an image, from raw bytes or from a url / data url
+async function getImageSizeFromBuffer(buf) {
+  try {
+    const bmp = await createImageBitmap(new Blob([buf]));
+    const size = { w: bmp.width, h: bmp.height };
+    if (bmp.close) bmp.close();
+    return size;
+  } catch (err) {
+    return null;
+  }
+}
+function getImageSizeFromSrc(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
 async function getImageBuffer(src) {
   if (src.startsWith('data:')) {
     return await dataUrlToBlob(src).arrayBuffer();
@@ -1657,7 +1685,9 @@ async function downloadStandardReport(drawingId, drawingName, triggerBtn) {
         if (cell.url) {
           try {
             const buf = await getImageBuffer(cell.url);
-            cellChildren.push(new Paragraph({ children: [new ImageRun({ data: buf, transformation: { width: imgW, height: imgH } })], alignment: AlignmentType.CENTER }));
+            const nat = await getImageSizeFromBuffer(buf);
+            const fit = nat ? fitInside(nat.w, nat.h, imgW, imgH) : { w: imgW, h: imgH };
+            cellChildren.push(new Paragraph({ children: [new ImageRun({ data: buf, transformation: { width: Math.round(fit.w), height: Math.round(fit.h) } })], alignment: AlignmentType.CENTER }));
           } catch (err) {
             cellChildren.push(new Paragraph({ text: '(photo could not be loaded)', alignment: AlignmentType.CENTER }));
           }
@@ -1827,10 +1857,15 @@ async function downloadPhotoPlanReport(drawingId, drawingName, triggerBtn) {
 
       const photoId = nextId();
       const boxXIn = OFFSET_X_IN + toIn(it.boxX), boxYIn = OFFSET_Y_IN + toIn(it.boxY);
-      const photoWIn = toIn(it.photoW), photoHIn = toIn(it.photoH);
-      slide.addImage({ data: photoData, x: boxXIn, y: boxYIn, w: photoWIn, h: photoHIn });
+      const boxWIn = toIn(it.photoW), boxHIn = toIn(it.photoH);
+      // keep the photo's own shape: fit it inside the box and centre it there
+      const nat = await getImageSizeFromSrc(photoData);
+      const fit = nat ? fitInside(nat.w, nat.h, boxWIn, boxHIn) : { w: boxWIn, h: boxHIn };
+      const photoWIn = fit.w, photoHIn = fit.h;
+      const picXIn = boxXIn + (boxWIn - photoWIn) / 2, picYIn = boxYIn + (boxHIn - photoHIn) / 2;
+      slide.addImage({ data: photoData, x: picXIn, y: picYIn, w: photoWIn, h: photoHIn });
       slide.addText(String(it.row.marker_number), {
-        x: boxXIn, y: boxYIn + photoHIn + 0.02, w: photoWIn, h: 0.25,
+        x: boxXIn, y: picYIn + photoHIn + 0.02, w: boxWIn, h: 0.25,
         fontSize: 12, bold: true, align: 'center', fontFace: 'Arial'
       });
       // that addText call above also consumes an id before the line's, so
@@ -1839,10 +1874,10 @@ async function downloadPhotoPlanReport(drawingId, drawingName, triggerBtn) {
 
       const lineId = nextId();
       const markerXIn = OFFSET_X_IN + toIn(it.markerPx), markerYIn = OFFSET_Y_IN + toIn(it.markerPy);
-      const anchorXIn = it.side === 'left' ? boxXIn + photoWIn : it.side === 'right' ? boxXIn
-        : boxXIn + photoWIn / 2;
-      const anchorYIn = it.side === 'top' ? boxYIn + photoHIn : it.side === 'bottom' ? boxYIn
-        : boxYIn + photoHIn / 2;
+      const anchorXIn = it.side === 'left' ? picXIn + photoWIn : it.side === 'right' ? picXIn
+        : picXIn + photoWIn / 2;
+      const anchorYIn = it.side === 'top' ? picYIn + photoHIn : it.side === 'bottom' ? picYIn
+        : picYIn + photoHIn / 2;
       slide.addShape('line', {
         x: Math.min(anchorXIn, markerXIn), y: Math.min(anchorYIn, markerYIn),
         w: Math.max(0.01, Math.abs(markerXIn - anchorXIn)), h: Math.max(0.01, Math.abs(markerYIn - anchorYIn)),
